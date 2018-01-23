@@ -62,7 +62,8 @@ mod os_impl {
     fn get_symbol_addr(proginfo: &ProgramInfo, symbol: &str) -> Option<usize> {
         let ruby_mach = match mach::Mach::parse(&proginfo.ruby_mach) {
             Ok(mach::Mach::Binary(m)) => m,
-            _ => panic!("oh no"),
+            Ok(mach::Mach::Fat(m)) => m.get(0).unwrap(),
+            Err(x) => panic!("error: {}", x),
         };
         let sym = get_symbol_addr_mach(&ruby_mach, symbol);
         match sym {
@@ -100,8 +101,10 @@ mod os_impl {
     fn get_program_info(pid: pid_t) -> Result<ProgramInfo, Error> {
         let vmmap = get_vmmap_output(pid)?;
         let (maps_addr, binary) = get_maps_address(&vmmap);
+        println!("binary: {}", binary);
         let mut file = std::fs::File::open(&binary)?;
         let mut contents: Vec<u8> = Vec::new();
+        file.read_to_end(&mut contents)?;
         Ok(ProgramInfo{
             pid: pid,
             ruby_start_addr: maps_addr,
