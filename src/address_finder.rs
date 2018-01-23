@@ -30,7 +30,11 @@ mod os_impl {
 
     pub fn get_ruby_version_address(pid: pid_t) -> Result<usize, Error> {
         let proginfo: ProgramInfo = get_program_info(pid)?;
-        get_symbol_addr(&proginfo, "ruby_version").ok_or(format_err!("Couldn't find Ruby version"))
+        let base_address = 0x100000000;
+        match get_symbol_addr(&proginfo, "_ruby_version"){
+            Some(x) => Ok(x + proginfo.ruby_start_addr - base_address),
+            _ => Err(format_err!("Couldn't find Ruby version")),
+        }
     }
 
     pub fn current_thread_address(
@@ -211,6 +215,7 @@ mod os_impl {
                 .get_symbols(&s)
                 .expect("Failed to get symbols from section")
             {
+                debug!("sym name: {}", sym.name);
                 if sym.name == symbol_name {
                     debug!("symbol: {}", sym);
                     return Some(sym.value as usize);
