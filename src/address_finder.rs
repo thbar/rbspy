@@ -49,12 +49,12 @@ mod os_impl {
             // TODO: make this more robust
             get_symbol_addr(
                 &proginfo,
-                "ruby_current_execution_context_ptr",
+                "_ruby_current_execution_context_ptr",
             )
         } else {
             get_symbol_addr(
                 &proginfo,
-                "ruby_current_thread",
+                "_ruby_current_thread",
             )
         };
         addr.ok_or(format_err!("Couldn't find current thread address"))
