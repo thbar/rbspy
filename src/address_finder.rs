@@ -37,7 +37,7 @@ mod os_impl {
     pub fn current_thread_address(
         pid: pid_t,
         version: &str,
-        is_maybe_thread: Box<Fn(usize, &ProcessHandle, &Vec<MapRange>) -> bool>,
+        _is_maybe_thread: Box<Fn(usize, &ProcessHandle, &Vec<MapRange>) -> bool>,
     ) -> Result<usize, Error> {
         // TODO: Make this actually look up the `__mh_execute_header` base
         //  address in the binary via `nm`.
@@ -45,8 +45,36 @@ mod os_impl {
         let proginfo = &get_program_info(pid)?;
         // let addr = get_nm_address(pid)? + (get_maps_address(pid)? - base_address);
         //debug!("get_ruby_current_thread_address: {:x}", addr);
-        Ok(base_address)
+        let addr = if version >= "2.5.0" {
+            // TODO: make this more robust
+            get_symbol_addr(
+                &proginfo,
+                "ruby_current_execution_context_ptr",
+            )
+        } else {
+            get_symbol_addr(
+                &proginfo,
+                "ruby_current_thread",
+            )
+        };
+        addr.ok_or(format_err!("Couldn't find current thread address"))
     }
+
+    fn get_symbol_addr(proginfo: &ProgramInfo, symbol: &str) -> Option<usize> {
+        let sym =  get_symbol_addr_mach(&proginfo.ruby_mach, symbol);
+        match sym {
+            Some(x) => Some(x),
+            None => match proginfo.libruby_mach{
+                Some(ref x) => get_symbol_addr_mach(x, symbol),
+                None => None,
+            },
+        }
+    }
+
+    fn get_symbol_addr_mach(mach: &mach::MachO, symbol: &str) -> Option<usize> {
+        None
+    }
+
     struct ProgramInfo {
         pub pid: pid_t,
         pub ruby_start_addr: usize,
@@ -58,12 +86,12 @@ mod os_impl {
     fn get_program_info(pid: pid_t) -> Result<ProgramInfo, Error> {
         let vmmap = get_vmmap_output(pid)?;
         let (maps_addr, binary) = get_maps_address(&vmmap);
-        let mut file = std::fs::File::open(binary)?;
+        let mut file = std::fs::File::open(&binary)?;
         let mut contents = Vec::new();
         file.read_to_end(&mut contents)?;
         let ruby_mach = match mach::Mach::parse(&contents)? {
             mach::Mach::Binary(m) => m,
-            _ => Err(format_err!("Couldn't parse mach-o file {}. Please report this!", binary))?,
+            _ => Err(format_err!("Couldn't parse mach-o file {}. Please report this!", &binary))?,
         };
         Ok(ProgramInfo{
             pid: pid,
