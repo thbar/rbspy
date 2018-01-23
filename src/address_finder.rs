@@ -41,8 +41,6 @@ mod os_impl {
         // TODO: Make this actually look up the `__mh_execute_header` base
         //  address in the binary via `nm`.
         let proginfo = &get_program_info(pid)?;
-        // let addr = get_nm_address(pid)? + (get_maps_address(pid)? - base_address);
-        //debug!("get_ruby_current_thread_address: {:x}", addr);
         let addr = if version >= "2.5.0" {
             // TODO: make this more robust
             get_symbol_addr(
@@ -68,8 +66,8 @@ mod os_impl {
         let base_address = 0x100000000;
         match sym {
             Some(x) => Some(x + proginfo.ruby_start_addr - base_address),
-            None => match proginfo.libruby_mach{
-                Some(ref x) => match get_symbol_addr_mach(&ruby_mach, symbol) {
+            None => match proginfo.libruby_mach {
+                Some(ref x) => match get_symbol_addr_mach(&x, symbol) {
                     Some(x) => Some(x + proginfo.libruby_start_addr.unwrap() - base_address),
                     None => None,
                 },
@@ -104,16 +102,26 @@ mod os_impl {
     fn get_program_info(pid: pid_t) -> Result<ProgramInfo, Error> {
         let vmmap = get_vmmap_output(pid)?;
         let (maps_addr, binary) = get_maps_address(&vmmap);
+        let (libruby_start_addr, maybe_binary) = get_libruby_address(&vmmap); 
         println!("binary: {}", binary);
         let mut file = std::fs::File::open(&binary)?;
         let mut contents: Vec<u8> = Vec::new();
         file.read_to_end(&mut contents)?;
+        let libruby_mach = match maybe_binary {
+            Some(b) => {
+                let mut file = std::fs::File::open(&binary)?;
+                let mut contents: Vec<u8> = Vec::new();
+                file.read_to_end(&mut contents)?;
+                Some(contents)
+            },
+            None => None,
+        };
         Ok(ProgramInfo{
             pid: pid,
             ruby_start_addr: maps_addr,
             ruby_mach: contents,
-            libruby_start_addr: None,
-            libruby_mach: None,
+            libruby_start_addr: libruby_start_addr,
+            libruby_mach: libruby_mach,
         })
     }
 
@@ -133,6 +141,27 @@ mod os_impl {
 
         Ok(String::from_utf8(vmmap_command.stdout)?)
     }
+
+
+    fn get_libruby_address(output:&str) -> (Option<usize>, Option<String>) {
+        let lines: Vec<&str> = output
+            .split("\n")
+            .filter(|line| line.ends_with("Ruby"))
+            .filter(|line| line.contains("__DATA"))
+            .collect();
+        let line = lines
+            .first();
+        match line {
+            None => (None, None),
+            Some(s) => {
+                let split: Vec<&str> = s.split_whitespace().collect();
+                let start_addr = usize::from_str_radix(split[1].split("-").next().unwrap(), 16).unwrap();
+                let binary = split[split.len() - 1].to_string();
+                (Some(start_addr), Some(binary))
+            }
+        }
+    }
+
 
 
     fn get_maps_address(output:&str) -> (usize, String) {
