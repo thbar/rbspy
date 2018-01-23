@@ -31,10 +31,7 @@ mod os_impl {
     pub fn get_ruby_version_address(pid: pid_t) -> Result<usize, Error> {
         let proginfo: ProgramInfo = get_program_info(pid)?;
         let base_address = 0x100000000;
-        match get_symbol_addr(&proginfo, "_ruby_version"){
-            Some(x) => Ok(x + proginfo.ruby_start_addr - base_address),
-            _ => Err(format_err!("Couldn't find Ruby version")),
-        }
+        get_symbol_addr(&proginfo, "_ruby_version").ok_or(format_err!("Couldn't find Ruby version"))
     }
 
     pub fn current_thread_address(
@@ -70,10 +67,14 @@ mod os_impl {
             Err(x) => panic!("error: {}", x),
         };
         let sym = get_symbol_addr_mach(&ruby_mach, symbol);
+        let base_address = 0x100000000;
         match sym {
-            Some(x) => Some(x),
+            Some(x) => Some(x + proginfo.ruby_start_addr - base_address),
             None => match proginfo.libruby_mach{
-                Some(ref x) => get_symbol_addr_mach(&ruby_mach, symbol),
+                Some(ref x) => match get_symbol_addr_mach(&ruby_mach, symbol) {
+                    Some(x) => Some(x + proginfo.libruby_start_addr.unwrap() - base_address),
+                    None => None,
+                },
                 None => None,
             },
         }
