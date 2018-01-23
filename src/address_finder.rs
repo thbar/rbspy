@@ -72,7 +72,18 @@ mod os_impl {
     }
 
     fn get_symbol_addr_mach(mach: &mach::MachO, symbol: &str) -> Option<usize> {
-        None
+        match mach.symbols.as_ref() {
+            Some(symbols) => {
+                for x in symbols.iter() {
+                    let (name, sym) = x.unwrap();
+                    if name == symbol {
+                        return Some(sym.n_value as usize);
+                    }
+                }
+                None
+            }
+            None => None,
+        }
     }
 
     struct ProgramInfo {
