@@ -19,8 +19,45 @@ pub enum AddressFinderError {
 
 #[cfg(target_os = "macos")]
 mod os_impl {
-    // TODO: fill this in.
-    fn get_maps_address(pid: pid_t) -> usize {
+    use goblin::mach;
+    use failure::Error;
+    use std;
+    use std::process::{Command, Stdio};
+    use libc::pid_t;
+
+    pub fn get_ruby_version_address(pid: pid_t) -> Result<usize, Error> {
+        let proginfo = &get_program_info(pid)?;
+        let ruby_version_symbol = "ruby_version";
+        Ok(200)
+    }
+
+    pub fn current_thread_address(pid: pid_t) -> Result<usize, Error> {
+        // TODO: Make this actually look up the `__mh_execute_header` base
+        //  address in the binary via `nm`.
+        let base_address = 0x100000000;
+        let proginfo = &get_program_info(pid)?;
+        // let addr = get_nm_address(pid)? + (get_maps_address(pid)? - base_address);
+        debug!("get_ruby_current_thread_address: {:x}", addr);
+        Ok(base_address)
+    }
+    struct ProgramInfo {
+        pub pid: pid_t,
+        pub ruby_start_addr: usize,
+        pub ruby_mach: mach::MachO<'static>,
+        pub libruby_start_addr: Option<usize>,
+        pub libruby_mach: Option<goblin::Mach::MachO>,
+    }
+
+    fn get_program_info(pid: pid_t) -> Result<ProgramInfo, Error> {
+        let vmmap = get_vmmap_output(pid);
+        let (maps_addr, binary) = get_maps_address(&output);
+        let mut file = std::fs::File::open(binary)?;
+        let mut contents = Vec::new();
+        file.read_to_end(&mut contents)?;
+        mach::Mach::parse(&contents);
+    }
+
+    fn get_vmmap_output(pid: pid_t) -> String {
         let vmmap_command = Command::new("vmmap")
             .arg(format!("{}", pid))
             .stdout(Stdio::piped())
@@ -32,37 +69,28 @@ mod os_impl {
             panic!(
                 "failed to execute process: {}",
                 String::from_utf8(vmmap_command.stderr).unwrap()
-            )
+                )
         }
 
-        let output = String::from_utf8(vmmap_command.stdout).unwrap();
+        String::from_utf8(vmmap_command.stdout).unwrap()
+    }
 
-        let lines: Vec<&str> = output
+
+    fn get_maps_address(output:&str) -> (usize, String) {
+        let line: &str = output
             .split("\n")
             .filter(|line| line.contains("bin/ruby"))
             .filter(|line| line.contains("__TEXT"))
-            .collect();
-        let line = lines
+            .collect()
             .first()
             .expect("No `__TEXT` line found for `bin/ruby` in vmmap output");
-
-        let re = Regex::new(r"([0-9a-f]+)").unwrap();
-        let cap = re.captures(&line).unwrap();
-        let address_str = cap.at(1).unwrap();
-        let addr = usize::from_str_radix(address_str, 16).unwrap();
-        debug!("get_maps_address: {:x}", addr);
-        addr
+        let mut split: Vec<&str> = line.split_whitespace().collect();
+        let start_addr = usize::from_str_radix(split[1], 16).unwrap();
+        let binary = split[split.len() - 1].to_string();
+        (start_addr, binary)
     }
 
-    #[cfg(target_os = "macos")]
-    fn current_thread_address(pid: pid_t) -> Result<usize, Error> {
-        // TODO: Make this actually look up the `__mh_execute_header` base
-        //   address in the binary via `nm`.
-        let base_address = 0x100000000;
-        let addr = get_nm_address(pid)? + (get_maps_address(pid)? - base_address);
-        debug!("get_ruby_current_thread_address: {:x}", addr);
-        addr
-    }
+    
 }
 
 #[cfg(target_os = "linux")]

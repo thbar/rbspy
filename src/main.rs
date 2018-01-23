@@ -10,6 +10,8 @@ extern crate elf;
 extern crate env_logger;
 #[macro_use]
 extern crate failure;
+#[cfg(target_os = "macos")]
+extern crate goblin;
 #[macro_use]
 extern crate failure_derive;
 extern crate libc;
