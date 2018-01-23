@@ -30,8 +30,7 @@ mod os_impl {
 
     pub fn get_ruby_version_address(pid: pid_t) -> Result<usize, Error> {
         let proginfo: ProgramInfo = get_program_info(pid)?;
-        let ruby_version_symbol = "ruby_version";
-        Ok(200)
+        get_symbol_addr(&proginfo, "ruby_version").ok_or(format_err!("Couldn't find Ruby version"))
     }
 
     pub fn current_thread_address(
@@ -140,7 +139,7 @@ mod os_impl {
             .first()
             .expect("No `__TEXT` line found for `bin/ruby` in vmmap output");
         let mut split: Vec<&str> = line.split_whitespace().collect();
-        let start_addr = usize::from_str_radix(split[1], 16).unwrap();
+        let start_addr = usize::from_str_radix(split[1].split("-").next().unwrap(), 16).unwrap();
         let binary = split[split.len() - 1].to_string();
         (start_addr, binary)
     }

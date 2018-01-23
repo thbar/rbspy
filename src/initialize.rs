@@ -81,6 +81,7 @@ impl StackTraceGetter {
 fn get_ruby_version_retry(pid: pid_t) -> Result<String, Error> {
     // this exists because sometimes rbenv takes a while to exec the right Ruby binary.
     // we are dumb right now so we just... wait until it seems to work out.
+    return get_ruby_version(pid);
     let mut i = 0;
     loop {
         let version = get_ruby_version(pid);
