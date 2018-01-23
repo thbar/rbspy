@@ -22,8 +22,11 @@ mod os_impl {
     use goblin::mach;
     use failure::Error;
     use std;
+    use std::io::Read;
     use std::process::{Command, Stdio};
     use libc::pid_t;
+    use proc_maps::MapRange;
+    use read_process_memory::*;
 
     pub fn get_ruby_version_address(pid: pid_t) -> Result<usize, Error> {
         let proginfo = &get_program_info(pid)?;
@@ -31,13 +34,17 @@ mod os_impl {
         Ok(200)
     }
 
-    pub fn current_thread_address(pid: pid_t) -> Result<usize, Error> {
+    pub fn current_thread_address(
+        pid: pid_t,
+        version: &str,
+        is_maybe_thread: Box<Fn(usize, &ProcessHandle, &Vec<MapRange>) -> bool>,
+    ) -> Result<usize, Error> {
         // TODO: Make this actually look up the `__mh_execute_header` base
         //  address in the binary via `nm`.
         let base_address = 0x100000000;
         let proginfo = &get_program_info(pid)?;
         // let addr = get_nm_address(pid)? + (get_maps_address(pid)? - base_address);
-        debug!("get_ruby_current_thread_address: {:x}", addr);
+        //debug!("get_ruby_current_thread_address: {:x}", addr);
         Ok(base_address)
     }
     struct ProgramInfo {
@@ -45,26 +52,35 @@ mod os_impl {
         pub ruby_start_addr: usize,
         pub ruby_mach: mach::MachO<'static>,
         pub libruby_start_addr: Option<usize>,
-        pub libruby_mach: Option<goblin::Mach::MachO>,
+        pub libruby_mach: Option<mach::MachO<'static>>,
     }
 
     fn get_program_info(pid: pid_t) -> Result<ProgramInfo, Error> {
-        let vmmap = get_vmmap_output(pid);
-        let (maps_addr, binary) = get_maps_address(&output);
+        let vmmap = get_vmmap_output(pid)?;
+        let (maps_addr, binary) = get_maps_address(&vmmap);
         let mut file = std::fs::File::open(binary)?;
         let mut contents = Vec::new();
         file.read_to_end(&mut contents)?;
-        mach::Mach::parse(&contents);
+        let ruby_mach = match mach::Mach::parse(&contents)? {
+            mach::Mach::Binary(m) => m,
+            _ => Err(format_err!("Couldn't parse mach-o file {}. Please report this!", binary))?,
+        };
+        Ok(ProgramInfo{
+            pid: pid,
+            ruby_start_addr: maps_addr,
+            ruby_mach: ruby_mach,
+            libruby_start_addr: None,
+            libruby_mach: None,
+        })
     }
 
-    fn get_vmmap_output(pid: pid_t) -> String {
+    fn get_vmmap_output(pid: pid_t) -> Result<String, Error> {
         let vmmap_command = Command::new("vmmap")
             .arg(format!("{}", pid))
             .stdout(Stdio::piped())
             .stdin(Stdio::null())
             .stderr(Stdio::piped())
-            .output()
-            .expect(format!("failed to execute process: {}", e));
+            .output()?;
         if !vmmap_command.status.success() {
             panic!(
                 "failed to execute process: {}",
@@ -72,16 +88,17 @@ mod os_impl {
                 )
         }
 
-        String::from_utf8(vmmap_command.stdout).unwrap()
+        Ok(String::from_utf8(vmmap_command.stdout)?)
     }
 
 
     fn get_maps_address(output:&str) -> (usize, String) {
-        let line: &str = output
+        let lines: Vec<&str> = output
             .split("\n")
             .filter(|line| line.contains("bin/ruby"))
             .filter(|line| line.contains("__TEXT"))
-            .collect()
+            .collect();
+        let line = lines
             .first()
             .expect("No `__TEXT` line found for `bin/ruby` in vmmap output");
         let mut split: Vec<&str> = line.split_whitespace().collect();
