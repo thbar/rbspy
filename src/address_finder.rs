@@ -29,7 +29,7 @@ mod os_impl {
     use read_process_memory::*;
 
     pub fn get_ruby_version_address(pid: pid_t) -> Result<usize, Error> {
-        let proginfo = &get_program_info(pid)?;
+        let proginfo: ProgramInfo = get_program_info(pid)?;
         let ruby_version_symbol = "ruby_version";
         Ok(200)
     }
@@ -61,11 +61,15 @@ mod os_impl {
     }
 
     fn get_symbol_addr(proginfo: &ProgramInfo, symbol: &str) -> Option<usize> {
-        let sym =  get_symbol_addr_mach(&proginfo.ruby_mach, symbol);
+        let ruby_mach = match mach::Mach::parse(&proginfo.ruby_mach).ok_or(format_err!("could't parse mach-o file"))? {
+            mach::Mach::Binary(m) => m,
+            _ => panic!("oh no"),
+        };
+        let sym = get_symbol_addr_mach(&ruby_mach, symbol);
         match sym {
             Some(x) => Some(x),
             None => match proginfo.libruby_mach{
-                Some(ref x) => get_symbol_addr_mach(x, symbol),
+                Some(ref x) => get_symbol_addr_mach(&ruby_mach, symbol),
                 None => None,
             },
         }
@@ -89,25 +93,20 @@ mod os_impl {
     struct ProgramInfo {
         pub pid: pid_t,
         pub ruby_start_addr: usize,
-        pub ruby_mach: mach::MachO<'static>,
+        pub ruby_mach: Vec<u8>,
         pub libruby_start_addr: Option<usize>,
-        pub libruby_mach: Option<mach::MachO<'static>>,
+        pub libruby_mach: Option<Vec<u8>>,
     }
 
     fn get_program_info(pid: pid_t) -> Result<ProgramInfo, Error> {
         let vmmap = get_vmmap_output(pid)?;
         let (maps_addr, binary) = get_maps_address(&vmmap);
         let mut file = std::fs::File::open(&binary)?;
-        let mut contents = Vec::new();
-        file.read_to_end(&mut contents)?;
-        let ruby_mach = match mach::Mach::parse(&contents)? {
-            mach::Mach::Binary(m) => m,
-            _ => Err(format_err!("Couldn't parse mach-o file {}. Please report this!", &binary))?,
-        };
+        let mut contents: Vec<u8> = Vec::new();
         Ok(ProgramInfo{
             pid: pid,
             ruby_start_addr: maps_addr,
-            ruby_mach: ruby_mach,
+            ruby_mach: contents,
             libruby_start_addr: None,
             libruby_mach: None,
         })
