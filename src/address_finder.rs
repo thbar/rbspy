@@ -61,8 +61,8 @@ mod os_impl {
     }
 
     fn get_symbol_addr(proginfo: &ProgramInfo, symbol: &str) -> Option<usize> {
-        let ruby_mach = match mach::Mach::parse(&proginfo.ruby_mach).ok_or(format_err!("could't parse mach-o file"))? {
-            mach::Mach::Binary(m) => m,
+        let ruby_mach = match mach::Mach::parse(&proginfo.ruby_mach) {
+            Ok(mach::Mach::Binary(m)) => m,
             _ => panic!("oh no"),
         };
         let sym = get_symbol_addr_mach(&ruby_mach, symbol);
