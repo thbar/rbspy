@@ -31,7 +31,7 @@ mod os_impl {
     use read_process_memory::*;
 
     pub fn get_ruby_version_address(pid: pid_t) -> Result<usize, Error> {
-        let proginfo: ProgramInfo = get_program_info(pid)?;
+        let proginfo: ProgramInfo = get_program_info(pid, true)?;
         proginfo.get_symbol("_ruby_version")
     }
 
@@ -42,7 +42,7 @@ mod os_impl {
     ) -> Result<usize, Error> {
         // TODO: Make this actually look up the `__mh_execute_header` base
         //  address in the binary via `nm`.
-        let proginfo = &get_program_info(pid)?;
+        let proginfo = &get_program_info(pid, false)?;
         if version >= "2.5.0" {
             proginfo.get_symbol("_ruby_current_execution_context_ptr")
         } else {
@@ -107,8 +107,8 @@ mod os_impl {
         pub libruby_addr: Option<Addr>,
     }
 
-    fn get_program_info(pid: pid_t) -> Result<ProgramInfo, Error> {
-        let vmmap = cache_vmmap_output(pid)?;
+    fn get_program_info(pid: pid_t, reload: bool) -> Result<ProgramInfo, Error> {
+        let vmmap = cache_vmmap_output(pid, reload)?;
         Ok(ProgramInfo{
             pid: pid,
             ruby_addr: get_maps_address(&vmmap)?,
@@ -116,13 +116,16 @@ mod os_impl {
         })
     }
 
-    fn cache_vmmap_output(pid: pid_t) -> Result<String, Error> {
+    fn cache_vmmap_output(pid: pid_t, reload: bool) -> Result<String, Error> {
         lazy_static! {
-            static ref cache: Arc<Mutex<Option<String>>> = Arc::new(Mutex::new(None));
+            static ref CACHE: Arc<Mutex<Option<String>>> = Arc::new(Mutex::new(None));
         }
-        let mut state = cache.lock().unwrap();
-        if let Some(ref x) = *state {
-            return Ok(x.clone());
+        let mut state = CACHE.lock().unwrap();
+        // only return a cached value if reload = false
+        if !reload {
+            if let Some(ref x) = *state {
+                return Ok(x.clone());
+            }
         }
         let output = get_vmmap_output(pid)?;
         std::mem::replace(&mut *state, Some(output.clone()));

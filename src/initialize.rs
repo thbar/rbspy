@@ -25,6 +25,7 @@ use read_process_memory::*;
  *   * Package all that up into a struct that the user can use to get stack traces.
  */
 pub fn initialize(pid: pid_t) -> Result<StackTraceGetter, Error> {
+    debug!("starting...");
     let version = get_ruby_version_retry(pid).context("Couldn't determine Ruby version")?;
     let is_maybe_thread = is_maybe_thread_function(&version);
     debug!("version: {}", version);
