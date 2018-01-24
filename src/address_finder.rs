@@ -30,7 +30,7 @@ mod os_impl {
 
     pub fn get_ruby_version_address(pid: pid_t) -> Result<usize, Error> {
         let proginfo: ProgramInfo = get_program_info(pid)?;
-        get_symbol_addr(&proginfo, "_ruby_version").ok_or(format_err!("Couldn't find Ruby version"))
+        proginfo.get_symbol("_ruby_version")
     }
 
     pub fn current_thread_address(
@@ -41,87 +41,75 @@ mod os_impl {
         // TODO: Make this actually look up the `__mh_execute_header` base
         //  address in the binary via `nm`.
         let proginfo = &get_program_info(pid)?;
-        let addr = if version >= "2.5.0" {
-            // TODO: make this more robust
-            get_symbol_addr(
-                &proginfo,
-                "_ruby_current_execution_context_ptr",
-            )
+        if version >= "2.5.0" {
+            proginfo.get_symbol("_ruby_current_execution_context_ptr")
         } else {
-            get_symbol_addr(
-                &proginfo,
-                "_ruby_current_thread",
-            )
+            proginfo.get_symbol("_ruby_current_thread")
         };
-        addr.ok_or(format_err!("Couldn't find current thread address"))
     }
 
-    fn get_symbol_addr(proginfo: &ProgramInfo, symbol: &str) -> Option<usize> {
-        let ruby_mach = match mach::Mach::parse(&proginfo.ruby_mach) {
-            Ok(mach::Mach::Binary(m)) => m,
-            Ok(mach::Mach::Fat(m)) => m.get(0).unwrap(),
-            Err(x) => panic!("error: {}", x),
-        };
-        let sym = get_symbol_addr_mach(&ruby_mach, symbol);
-        let base_address = 0x100000000;
-        match sym {
-            Some(x) => Some(x + proginfo.ruby_start_addr - base_address),
-            None => match proginfo.libruby_mach {
-                Some(ref x) => match get_symbol_addr_mach(&x, symbol) {
-                    Some(x) => Some(x + proginfo.libruby_start_addr.unwrap() - base_address),
-                    None => None,
-                },
-                None => None,
-            },
+    struct Addr {
+        pub start_addr: usize,
+        pub mach: Vec<u8>,
+    }
+
+    impl ProgramInfo {
+        pub fn get_symbol(&self, symbol_name: &str) -> Result<usize, Error> {
+            if let Some(x) = self.ruby_addr.get_symbol(symbol_name)? {
+                Ok(x)
+            } else if let Some(y) = self.libruby_addr {
+                match y.get_symbol(symbol_name) {
+                    Some(sym) => Ok(sym),
+                    None => Err(format_err!("Couldn't find symbol")),
+                }
+            } else {
+                Err(format_err!("Couldn't find right Ruby mach file"))
+            }
         }
     }
 
-    fn get_symbol_addr_mach(mach: &mach::MachO, symbol: &str) -> Option<usize> {
-        match mach.symbols.as_ref() {
-            Some(symbols) => {
-                for x in symbols.iter() {
-                    let (name, sym) = x.unwrap();
-                    if name == symbol {
-                        return Some(sym.n_value as usize);
+    impl Addr {
+        pub fn from(start_addr: usize, filename: &str) -> Result<Addr, Error> {
+            let mut file = std::fs::File::open(&filename)?;
+            let mut contents: Vec<u8> = Vec::new();
+            file.read_to_end(&mut contents)?;
+            return Addr{start_addr: start_addr, mach: contents};
+        }
+
+        pub fn get_symbol(&self, symbol_name: &str) -> Result<Option<usize>, Error> {
+            let mach = match mach::Mach::parse(&self.mach) {
+                Ok(mach::Mach::Binary(m)) => m,
+                Ok(mach::Mach::Fat(m)) => m.get(0).unwrap(),
+                _ => {return format_err!("Couldn't parse Mach-O binary");},
+            };
+            let base_address = 0x100000000;
+            match mach.symbols.as_ref() {
+                Some(symbols) => {
+                    for x in symbols.iter() {
+                        let (name, sym) = x.unwrap();
+                        if name == symbol_name {
+                            return Ok(Some(sym.n_value as usize + self.start_addr - base_address));
+                        }
                     }
+                    Ok(None)
                 }
-                None
+                None => Ok(None),
             }
-            None => None,
         }
     }
 
     struct ProgramInfo {
         pub pid: pid_t,
-        pub ruby_start_addr: usize,
-        pub ruby_mach: Vec<u8>,
-        pub libruby_start_addr: Option<usize>,
-        pub libruby_mach: Option<Vec<u8>>,
+        pub ruby_addr: Addr,
+        pub libruby_addr: Option<Addr>,
     }
 
     fn get_program_info(pid: pid_t) -> Result<ProgramInfo, Error> {
         let vmmap = get_vmmap_output(pid)?;
-        let (maps_addr, binary) = get_maps_address(&vmmap);
-        let (libruby_start_addr, maybe_binary) = get_libruby_address(&vmmap); 
-        println!("binary: {}", binary);
-        let mut file = std::fs::File::open(&binary)?;
-        let mut contents: Vec<u8> = Vec::new();
-        file.read_to_end(&mut contents)?;
-        let libruby_mach = match maybe_binary {
-            Some(b) => {
-                let mut file = std::fs::File::open(&binary)?;
-                let mut contents: Vec<u8> = Vec::new();
-                file.read_to_end(&mut contents)?;
-                Some(contents)
-            },
-            None => None,
-        };
         Ok(ProgramInfo{
             pid: pid,
-            ruby_start_addr: maps_addr,
-            ruby_mach: contents,
-            libruby_start_addr: libruby_start_addr,
-            libruby_mach: libruby_mach,
+            ruby_addr: get_maps_address(&vmmap),
+            libruby_addr: get_libruby_address(&vmmap),
         })
     }
 
@@ -143,7 +131,7 @@ mod os_impl {
     }
 
 
-    fn get_libruby_address(output:&str) -> (Option<usize>, Option<String>) {
+    fn get_libruby_address(output:&str) -> Result<Option<Addr>, Error> {
         let lines: Vec<&str> = output
             .split("\n")
             .filter(|line| line.ends_with("Ruby"))
@@ -152,19 +140,17 @@ mod os_impl {
         let line = lines
             .first();
         match line {
-            None => (None, None),
+            None => Ok(None),
             Some(s) => {
                 let split: Vec<&str> = s.split_whitespace().collect();
                 let start_addr = usize::from_str_radix(split[1].split("-").next().unwrap(), 16).unwrap();
-                let binary = split[split.len() - 1].to_string();
-                (Some(start_addr), Some(binary))
-            }
+                let binary = split[split.len() - 1];
+                Ok(Some(Addr::from(start_addr, binary)?))
+            },
         }
     }
 
-
-
-    fn get_maps_address(output:&str) -> (usize, String) {
+    fn get_maps_address(output:&str) -> Addr {
         let lines: Vec<&str> = output
             .split("\n")
             .filter(|line| line.contains("bin/ruby"))
@@ -175,11 +161,9 @@ mod os_impl {
             .expect("No `__TEXT` line found for `bin/ruby` in vmmap output");
         let split: Vec<&str> = line.split_whitespace().collect();
         let start_addr = usize::from_str_radix(split[1].split("-").next().unwrap(), 16).unwrap();
-        let binary = split[split.len() - 1].to_string();
-        (start_addr, binary)
+        let binary = split[split.len() - 1];
+        Addr::from(start_addr, binary)
     }
-
-    
 }
 
 #[cfg(target_os = "linux")]
@@ -213,7 +197,7 @@ mod os_impl {
 
     pub fn get_ruby_version_address(pid: pid_t) -> Result<usize, Error> {
         let proginfo = &get_program_info(pid)?;
-        let ruby_version_symbol = "ruby_version";
+        proginfo.get_symbol("_ruby_version")
         let symbol_addr =
             get_symbol_addr(&proginfo.ruby_map, &proginfo.ruby_elf, ruby_version_symbol);
         match symbol_addr {
