@@ -57,7 +57,7 @@ mod os_impl {
         pub fn get_symbol(&self, symbol_name: &str) -> Result<usize, Error> {
             if let Some(x) = self.ruby_addr.get_symbol(symbol_name)? {
                 Ok(x)
-            } else if let Some(y) = self.libruby_addr {
+            } else if let Some(y) = self.libruby_addr.as_ref() {
                 match y.get_symbol(symbol_name)? {
                     Some(sym) => Ok(sym),
                     None => Err(format_err!("Couldn't find symbol")),
