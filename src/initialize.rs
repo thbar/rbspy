@@ -27,15 +27,17 @@ use read_process_memory::*;
 pub fn initialize(pid: pid_t) -> Result<StackTraceGetter, Error> {
     let version = get_ruby_version_retry(pid).context("Couldn't determine Ruby version")?;
     let is_maybe_thread = is_maybe_thread_function(&version);
-
     debug!("version: {}", version);
+    let current_thread_address = address_finder::current_thread_address(
+        pid,
+        &version,
+        is_maybe_thread,
+    )?;
+    debug!("current thread address: {:x}",current_thread_address);
+
     Ok(StackTraceGetter {
         pid: pid,
-        current_thread_addr_location: address_finder::current_thread_address(
-            pid,
-            &version,
-            is_maybe_thread,
-        )?,
+        current_thread_addr_location: current_thread_address,
         stack_trace_function: get_stack_trace_function(&version),
     })
 }

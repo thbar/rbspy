@@ -23,6 +23,8 @@ mod os_impl {
     use failure::Error;
     use std;
     use std::io::Read;
+    use std::sync::Mutex;
+    use std::sync::Arc;
     use std::process::{Command, Stdio};
     use libc::pid_t;
     use proc_maps::MapRange;
@@ -44,6 +46,7 @@ mod os_impl {
         if version >= "2.5.0" {
             proginfo.get_symbol("_ruby_current_execution_context_ptr")
         } else {
+            debug!("getting symbol");
             proginfo.get_symbol("_ruby_current_thread")
         }
     }
@@ -105,12 +108,25 @@ mod os_impl {
     }
 
     fn get_program_info(pid: pid_t) -> Result<ProgramInfo, Error> {
-        let vmmap = get_vmmap_output(pid)?;
+        let vmmap = cache_vmmap_output(pid)?;
         Ok(ProgramInfo{
             pid: pid,
             ruby_addr: get_maps_address(&vmmap)?,
             libruby_addr: get_libruby_address(&vmmap)?,
         })
+    }
+
+    fn cache_vmmap_output(pid: pid_t) -> Result<String, Error> {
+        lazy_static! {
+            static ref cache: Arc<Mutex<Option<String>>> = Arc::new(Mutex::new(None));
+        }
+        let mut state = cache.lock().unwrap();
+        if let Some(ref x) = *state {
+            return Ok(x.clone());
+        }
+        let output = get_vmmap_output(pid)?;
+        std::mem::replace(&mut *state, Some(output.clone()));
+        Ok(output)
     }
 
     fn get_vmmap_output(pid: pid_t) -> Result<String, Error> {

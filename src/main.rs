@@ -23,6 +23,9 @@ extern crate rbspy_testdata;
 extern crate rand;
 #[cfg(target_os = "macos")]
 extern crate regex;
+#[macro_use]
+#[cfg(target_os = "macos")]
+extern crate lazy_static;
 extern crate ruby_bindings as bindings;
 #[cfg(test)]
 extern crate tempdir;
