@@ -45,7 +45,7 @@ mod os_impl {
             proginfo.get_symbol("_ruby_current_execution_context_ptr")
         } else {
             proginfo.get_symbol("_ruby_current_thread")
-        };
+        }
     }
 
     struct Addr {
@@ -58,7 +58,7 @@ mod os_impl {
             if let Some(x) = self.ruby_addr.get_symbol(symbol_name)? {
                 Ok(x)
             } else if let Some(y) = self.libruby_addr {
-                match y.get_symbol(symbol_name) {
+                match y.get_symbol(symbol_name)? {
                     Some(sym) => Ok(sym),
                     None => Err(format_err!("Couldn't find symbol")),
                 }
@@ -73,14 +73,14 @@ mod os_impl {
             let mut file = std::fs::File::open(&filename)?;
             let mut contents: Vec<u8> = Vec::new();
             file.read_to_end(&mut contents)?;
-            return Addr{start_addr: start_addr, mach: contents};
+            Ok(Addr{start_addr: start_addr, mach: contents})
         }
 
         pub fn get_symbol(&self, symbol_name: &str) -> Result<Option<usize>, Error> {
             let mach = match mach::Mach::parse(&self.mach) {
                 Ok(mach::Mach::Binary(m)) => m,
                 Ok(mach::Mach::Fat(m)) => m.get(0).unwrap(),
-                _ => {return format_err!("Couldn't parse Mach-O binary");},
+                _ => {return Err(format_err!("Couldn't parse Mach-O binary"));},
             };
             let base_address = 0x100000000;
             match mach.symbols.as_ref() {
@@ -108,8 +108,8 @@ mod os_impl {
         let vmmap = get_vmmap_output(pid)?;
         Ok(ProgramInfo{
             pid: pid,
-            ruby_addr: get_maps_address(&vmmap),
-            libruby_addr: get_libruby_address(&vmmap),
+            ruby_addr: get_maps_address(&vmmap)?,
+            libruby_addr: get_libruby_address(&vmmap)?,
         })
     }
 
@@ -150,7 +150,7 @@ mod os_impl {
         }
     }
 
-    fn get_maps_address(output:&str) -> Addr {
+    fn get_maps_address(output:&str) -> Result<Addr, Error> {
         let lines: Vec<&str> = output
             .split("\n")
             .filter(|line| line.contains("bin/ruby"))
@@ -197,9 +197,7 @@ mod os_impl {
 
     pub fn get_ruby_version_address(pid: pid_t) -> Result<usize, Error> {
         let proginfo = &get_program_info(pid)?;
-        proginfo.get_symbol("_ruby_version")
-        let symbol_addr =
-            get_symbol_addr(&proginfo.ruby_map, &proginfo.ruby_elf, ruby_version_symbol);
+        let symbol_addr = get_symbol_addr(&proginfo.ruby_map, &proginfo.ruby_elf, ruby_version_symbol);
         match symbol_addr {
             Some(addr) => Ok(addr),
             _ => {
