@@ -116,7 +116,7 @@ mod os_impl {
 
     fn get_program_info(pid: pid_t, reload: bool) -> Result<ProgramInfo, Error> {
         let task = task_for_pid(pid).context(format!("Couldn't get port for PID {}", pid))?;
-        let vmmap = get_process_maps(task);
+        let vmmap = get_process_maps(pid, task);
         Ok(ProgramInfo{
             pid: pid,
             ruby_addr: get_maps_address(&vmmap)?,
@@ -165,13 +165,14 @@ mod os_impl {
     fn get_maps_address(maps: &Vec<MacMapRange>) -> Result<Addr, Error> {
         let map: &MacMapRange = maps.iter()
             .find(|ref m| {
+                println!("{:?}", m);
                 if let Some(ref pathname) = m.filename {
                     pathname.contains("bin/ruby") && m.is_exec()
                 } else {
                     false
                 }
             }).ok_or(format_err!("Couldn't find ruby map"))?;
-
+        println!("{:?}", map);
         Addr::from(map.start as usize, map.filename.as_ref().unwrap())
     }
 }

@@ -36,13 +36,13 @@ impl MacMapRange {
     }
 }
 
-pub fn get_process_maps(task: mach_port_name_t) -> Vec<MacMapRange> {
-    let init_region = mach_vm_region(task, 1).unwrap();
+pub fn get_process_maps(pid: pid_t, task: mach_port_name_t) -> Vec<MacMapRange> {
+    let init_region = mach_vm_region(pid, task, 1).unwrap();
     let mut vec = vec![];
     let mut region = init_region.clone();
     vec.push(init_region);
     loop {
-        match mach_vm_region(task, region.end()) {
+        match mach_vm_region(pid, task, region.end()) {
             Some(r) => {
                 vec.push(r.clone());
                 region = r;
@@ -52,7 +52,7 @@ pub fn get_process_maps(task: mach_port_name_t) -> Vec<MacMapRange> {
     }
 }
 
-fn mach_vm_region(target_task: mach_port_name_t, mut address: mach_vm_address_t) -> Option<MacMapRange> {
+fn mach_vm_region(pid: pid_t, target_task: mach_port_name_t, mut address: mach_vm_address_t) -> Option<MacMapRange> {
     let mut count = mem::size_of::<vm_region_basic_info_data_64_t>() as mach_msg_type_number_t;
     let mut object_name: mach_port_t = 0;
     let mut size = unsafe { mem::zeroed::<mach_vm_size_t>() };
@@ -71,7 +71,7 @@ fn mach_vm_region(target_task: mach_port_name_t, mut address: mach_vm_address_t)
     if result != KERN_SUCCESS {
         return None;
     }
-    let filename = match regionfilename(41000, address) {
+    let filename = match regionfilename(pid, address) {
         Ok(x) => Some(x),
         _ => None,
     };
