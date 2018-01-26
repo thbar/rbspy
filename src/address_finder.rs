@@ -14,54 +14,104 @@ pub enum AddressFinderError {
     #[fail(display = "No process with PID: {}", _0)] NoSuchProcess(pid_t),
     #[fail(display = "Permission denied when reading from process {}. Try again with sudo?", _0)]
     PermissionDenied(pid_t),
+    #[fail(display = "Couldn't get port for PID {}. Possibilities: that process doesn't exist, you need to be root, or you have SIP enabled and you're trying to profile system Ruby (try rbenv instead).", _0)]
+    MacPermissionDenied(pid_t),
     #[fail(display = "Error reading /proc/{}/maps", _0)] ProcMapsError(pid_t),
 }
 
 #[cfg(target_os = "macos")]
 mod os_impl {
-    // TODO: fill this in.
-    fn get_maps_address(pid: pid_t) -> usize {
-        let vmmap_command = Command::new("vmmap")
-            .arg(format!("{}", pid))
-            .stdout(Stdio::piped())
-            .stdin(Stdio::null())
-            .stderr(Stdio::piped())
-            .output()
-            .expect(format!("failed to execute process: {}", e));
-        if !vmmap_command.status.success() {
-            panic!(
-                "failed to execute process: {}",
-                String::from_utf8(vmmap_command.stderr).unwrap()
-            )
-        }
+    use address_finder::AddressFinderError;
+    use goblin::mach;
+    use failure::Error;
+    use std;
+    use std::io::Read;
+    use libc::pid_t;
+    use proc_maps::MapRange;
+    use read_process_memory::*;
+    use mac_maps::{get_process_maps, task_for_pid, MacMapRange};
 
-        let output = String::from_utf8(vmmap_command.stdout).unwrap();
-
-        let lines: Vec<&str> = output
-            .split("\n")
-            .filter(|line| line.contains("bin/ruby"))
-            .filter(|line| line.contains("__TEXT"))
-            .collect();
-        let line = lines
-            .first()
-            .expect("No `__TEXT` line found for `bin/ruby` in vmmap output");
-
-        let re = Regex::new(r"([0-9a-f]+)").unwrap();
-        let cap = re.captures(&line).unwrap();
-        let address_str = cap.at(1).unwrap();
-        let addr = usize::from_str_radix(address_str, 16).unwrap();
-        debug!("get_maps_address: {:x}", addr);
-        addr
+    pub fn get_ruby_version_address(pid: pid_t) -> Result<usize, Error> {
+        let binary = &get_ruby_binary(pid)?;
+        binary.symbol_addr("_ruby_version")
     }
 
-    #[cfg(target_os = "macos")]
-    fn current_thread_address(pid: pid_t) -> Result<usize, Error> {
-        // TODO: Make this actually look up the `__mh_execute_header` base
-        //   address in the binary via `nm`.
-        let base_address = 0x100000000;
-        let addr = get_nm_address(pid)? + (get_maps_address(pid)? - base_address);
-        debug!("get_ruby_current_thread_address: {:x}", addr);
-        addr
+    pub fn current_thread_address(
+        pid: pid_t,
+        version: &str,
+        _is_maybe_thread: Box<Fn(usize, &ProcessHandle, &Vec<MapRange>) -> bool>,
+    ) -> Result<usize, Error> {
+        let binary = &get_ruby_binary(pid)?;
+        if version >= "2.5.0" {
+            binary.symbol_addr("_ruby_current_execution_context_ptr")
+        } else {
+            binary.symbol_addr("_ruby_current_thread")
+        }
+    }
+
+    struct Binary {
+        pub start_addr: usize,
+        pub mach: Vec<u8>,
+    }
+
+    impl Binary {
+        pub fn from(start_addr: usize, filename: &str) -> Result<Binary, Error> {
+            let mut file = std::fs::File::open(&filename)?;
+            let mut contents: Vec<u8> = Vec::new();
+            file.read_to_end(&mut contents)?;
+            Ok(Binary {
+                start_addr: start_addr,
+                mach: contents,
+            })
+        }
+
+        pub fn symbol_addr(&self, symbol_name: &str) -> Result<usize, Error> {
+            let base_address = self.symbol_value_mach("__mh_execute_header")?;
+            let addr = self.symbol_value_mach(symbol_name)?;
+            Ok(addr + self.start_addr - base_address)
+        }
+
+        // Gets the value of a symbol from the Mach-O binary
+        // TODO: don't repeatedly parse the Mach-O binary every time
+        // haven't done this yet because of lifetime annoyances
+        pub fn symbol_value_mach(&self, symbol_name: &str) -> Result<usize, Error> {
+            let mach = match mach::Mach::parse(&self.mach) {
+                Ok(mach::Mach::Binary(m)) => m,
+                // TODO: smarter way of getting the right version from a fat binary
+                Ok(mach::Mach::Fat(m)) => m.get(0).unwrap(),
+                _ => {
+                    return Err(format_err!("Couldn't parse Mach-O binary"));
+                }
+            };
+            match mach.symbols.as_ref() {
+                Some(symbols) => for x in symbols.iter() {
+                    let (name, sym) = x.unwrap();
+                    if name == symbol_name {
+                        return Ok(sym.n_value as usize);
+                    }
+                },
+                None => {}
+            };
+            Err(format_err!("Couldn't get `{}` symbol. This is likely because rbspy doesn't work with system Ruby on Mac. Try with rbenv/rvm ruby?", symbol_name))
+        }
+    }
+
+    fn get_ruby_binary(pid: pid_t) -> Result<Binary, Error> {
+        let task = task_for_pid(pid).map_err(|_| AddressFinderError::MacPermissionDenied(pid))?;
+        let vmmap = get_process_maps(pid, task);
+        get_maps_address(&vmmap)
+    }
+
+    fn get_maps_address(maps: &Vec<MacMapRange>) -> Result<Binary, Error> {
+        let map: &MacMapRange = maps.iter()
+            .find(|ref m| {
+                if let Some(ref pathname) = m.filename {
+                    pathname.contains("bin/ruby") && m.is_exec()
+                } else {
+                    false
+                }
+            }).ok_or(format_err!("Couldn't find ruby map"))?;
+        Binary::from(map.start as usize, map.filename.as_ref().unwrap())
     }
 }
 
