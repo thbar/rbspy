@@ -165,14 +165,12 @@ mod os_impl {
     fn get_maps_address(maps: &Vec<MacMapRange>) -> Result<Addr, Error> {
         let map: &MacMapRange = maps.iter()
             .find(|ref m| {
-                println!("{:?}", m);
                 if let Some(ref pathname) = m.filename {
                     pathname.contains("bin/ruby") && m.is_exec()
                 } else {
                     false
                 }
             }).ok_or(format_err!("Couldn't find ruby map"))?;
-        println!("{:?}", map);
         Addr::from(map.start as usize, map.filename.as_ref().unwrap())
     }
 }
