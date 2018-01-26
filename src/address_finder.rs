@@ -92,7 +92,6 @@ mod os_impl {
             } else {
                 0x100000000
             };
-            let base_address = 0;
             match mach.symbols.as_ref() {
                 Some(symbols) => {
                     for x in symbols.iter() {
