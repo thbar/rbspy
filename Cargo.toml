@@ -23,10 +23,10 @@ failure_derive = "0.1.1"
 ruby-bindings = { path = "ruby-bindings" }
 
 [target.'cfg(target_os="macos")'.dependencies]
-mach = "0.0.5"
+mach = "0.1.2"
 regex = "0.2.3"
+libproc = {git="https://github.com/andrewdavidmackenzie/libproc-rs.git"}
 lazy_static = "1.0.0"
-libproc = "0.1.0"
 goblin = "0.0.14"
 object = "0.1.0"
 #libarchive = "0.1.1"

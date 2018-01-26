@@ -21,6 +21,7 @@ pub enum AddressFinderError {
 mod os_impl {
     use goblin::mach;
     use failure::Error;
+    use failure::ResultExt;
     use std;
     use std::io::Read;
     use std::sync::Mutex;
@@ -29,6 +30,7 @@ mod os_impl {
     use libc::pid_t;
     use proc_maps::MapRange;
     use read_process_memory::*;
+    use mac_maps::{MacMapRange, get_process_maps, task_for_pid};
 
     pub fn get_ruby_version_address(pid: pid_t) -> Result<usize, Error> {
         let proginfo: ProgramInfo = get_program_info(pid, true)?;
@@ -85,7 +87,12 @@ mod os_impl {
                 Ok(mach::Mach::Fat(m)) => m.get(0).unwrap(),
                 _ => {return Err(format_err!("Couldn't parse Mach-O binary"));},
             };
-            let base_address = 0x100000000;
+            let base_address = if symbol_name == "_ruby_version" {
+                0x100000000
+            } else {
+                0x100000000
+            };
+            let base_address = 0;
             match mach.symbols.as_ref() {
                 Some(symbols) => {
                     for x in symbols.iter() {
@@ -108,7 +115,8 @@ mod os_impl {
     }
 
     fn get_program_info(pid: pid_t, reload: bool) -> Result<ProgramInfo, Error> {
-        let vmmap = cache_vmmap_output(pid, reload)?;
+        let task = task_for_pid(pid).context(format!("Couldn't get port for PID {}", pid))?;
+        let vmmap = get_process_maps(task);
         Ok(ProgramInfo{
             pid: pid,
             ruby_addr: get_maps_address(&vmmap)?,
@@ -150,38 +158,21 @@ mod os_impl {
     }
 
 
-    fn get_libruby_address(output:&str) -> Result<Option<Addr>, Error> {
-        let lines: Vec<&str> = output
-            .split("\n")
-            .filter(|line| line.ends_with("Ruby"))
-            .filter(|line| line.contains("__DATA"))
-            .collect();
-        let line = lines
-            .first();
-        match line {
-            None => Ok(None),
-            Some(s) => {
-                let split: Vec<&str> = s.split_whitespace().collect();
-                let start_addr = usize::from_str_radix(split[1].split("-").next().unwrap(), 16).unwrap();
-                let binary = split[split.len() - 1];
-                Ok(Some(Addr::from(start_addr, binary)?))
-            },
-        }
+    fn get_libruby_address(maps:&Vec<MacMapRange>) -> Result<Option<Addr>, Error> {
+        Ok(None)
     }
 
-    fn get_maps_address(output:&str) -> Result<Addr, Error> {
-        let lines: Vec<&str> = output
-            .split("\n")
-            .filter(|line| line.contains("bin/ruby"))
-            .filter(|line| line.contains("__TEXT"))
-            .collect();
-        let line = lines
-            .first()
-            .expect("No `__TEXT` line found for `bin/ruby` in vmmap output");
-        let split: Vec<&str> = line.split_whitespace().collect();
-        let start_addr = usize::from_str_radix(split[1].split("-").next().unwrap(), 16).unwrap();
-        let binary = split[split.len() - 1];
-        Addr::from(start_addr, binary)
+    fn get_maps_address(maps: &Vec<MacMapRange>) -> Result<Addr, Error> {
+        let map = maps.iter()
+            .find(|ref m| {
+                if let Some(ref pathname) = m.filename {
+                    pathname.contains("bin/ruby") && m.is_exec()
+                } else {
+                    false
+                }
+            }).ok_or(Err(format_err!("Couldn't find ruby map")))?;
+
+        Addr::from(map.start as usize, &map.filename.unwrap())
     }
 }
 
