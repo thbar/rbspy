@@ -93,6 +93,7 @@ mod os_impl {
                 0x100000000
             };
             match mach.symbols.as_ref() {
+            let base_address = 0;
                 Some(symbols) => {
                     for x in symbols.iter() {
                         let (name, sym) = x.unwrap();
@@ -170,7 +171,6 @@ mod os_impl {
                     false
                 }
             }).ok_or(format_err!("Couldn't find ruby map"))?;
-        println!("{:?}", map);
         Addr::from(map.start as usize, map.filename.as_ref().unwrap())
     }
 }
