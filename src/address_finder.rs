@@ -48,7 +48,6 @@ mod os_impl {
         if version >= "2.5.0" {
             proginfo.get_symbol("_ruby_current_execution_context_ptr")
         } else {
-            debug!("getting symbol");
             proginfo.get_symbol("_ruby_current_thread")
         }
     }
@@ -62,13 +61,8 @@ mod os_impl {
         pub fn get_symbol(&self, symbol_name: &str) -> Result<usize, Error> {
             if let Some(x) = self.ruby_addr.get_symbol(symbol_name)? {
                 Ok(x)
-            } else if let Some(y) = self.libruby_addr.as_ref() {
-                match y.get_symbol(symbol_name)? {
-                    Some(sym) => Ok(sym),
-                    None => Err(format_err!("Couldn't find symbol")),
-                }
             } else {
-                Err(format_err!("Couldn't find right Ruby mach file"))
+                Err(format_err!("Couldn't get symbol. This is likely because rbenv doesn't work with system Ruby on Mac."))
             }
         }
     }
@@ -110,55 +104,15 @@ mod os_impl {
     struct ProgramInfo {
         pub pid: pid_t,
         pub ruby_addr: Addr,
-        pub libruby_addr: Option<Addr>,
     }
 
     fn get_program_info(pid: pid_t, reload: bool) -> Result<ProgramInfo, Error> {
-        let task = task_for_pid(pid).context(format!("Couldn't get port for PID {}", pid))?;
+        let task = task_for_pid(pid).context(format!("Couldn't get port for PID {}. Either you need to be root or you have SIP enabled and you're trying to profile system Ruby (which won't work).", pid))?;
         let vmmap = get_process_maps(pid, task);
         Ok(ProgramInfo{
             pid: pid,
             ruby_addr: get_maps_address(&vmmap)?,
-            libruby_addr: get_libruby_address(&vmmap)?,
         })
-    }
-
-    fn cache_vmmap_output(pid: pid_t, reload: bool) -> Result<String, Error> {
-        lazy_static! {
-            static ref CACHE: Arc<Mutex<Option<String>>> = Arc::new(Mutex::new(None));
-        }
-        let mut state = CACHE.lock().unwrap();
-        // only return a cached value if reload = false
-        if !reload {
-            if let Some(ref x) = *state {
-                return Ok(x.clone());
-            }
-        }
-        let output = get_vmmap_output(pid)?;
-        std::mem::replace(&mut *state, Some(output.clone()));
-        Ok(output)
-    }
-
-    fn get_vmmap_output(pid: pid_t) -> Result<String, Error> {
-        let vmmap_command = Command::new("vmmap")
-            .arg(format!("{}", pid))
-            .stdout(Stdio::piped())
-            .stdin(Stdio::null())
-            .stderr(Stdio::piped())
-            .output()?;
-        if !vmmap_command.status.success() {
-            panic!(
-                "failed to execute process: {}",
-                String::from_utf8(vmmap_command.stderr).unwrap()
-                )
-        }
-
-        Ok(String::from_utf8(vmmap_command.stdout)?)
-    }
-
-
-    fn get_libruby_address(maps:&Vec<MacMapRange>) -> Result<Option<Addr>, Error> {
-        Ok(None)
     }
 
     fn get_maps_address(maps: &Vec<MacMapRange>) -> Result<Addr, Error> {
