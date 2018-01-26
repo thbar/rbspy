@@ -5,7 +5,6 @@ use mach::kern_return::{kern_return_t, KERN_SUCCESS};
 use mach::port::{mach_port_name_t, mach_port_t, MACH_PORT_NULL};
 use mach::vm_types::{mach_vm_address_t, mach_vm_size_t};
 use mach::message::mach_msg_type_number_t;
-use mach::types::task_t;
 use mach::vm_region::{vm_region_basic_info_data_t, vm_region_info_t,
                             vm_region_basic_info_data_64_t, VM_REGION_BASIC_INFO};
 use mach::types::vm_task_entry_t;

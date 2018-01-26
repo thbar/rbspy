@@ -87,7 +87,7 @@ mod os_impl {
                 Ok(mach::Mach::Fat(m)) => m.get(0).unwrap(),
                 _ => {return Err(format_err!("Couldn't parse Mach-O binary"));},
             };
-            let base_address = if symbol_name == "_ruby_version" {
+            let base_address: usize = if symbol_name == "_ruby_version" {
                 0x100000000
             } else {
                 0x100000000
@@ -163,16 +163,16 @@ mod os_impl {
     }
 
     fn get_maps_address(maps: &Vec<MacMapRange>) -> Result<Addr, Error> {
-        let map = maps.iter()
+        let map: &MacMapRange = maps.iter()
             .find(|ref m| {
                 if let Some(ref pathname) = m.filename {
                     pathname.contains("bin/ruby") && m.is_exec()
                 } else {
                     false
                 }
-            }).ok_or(Err(format_err!("Couldn't find ruby map")))?;
+            }).ok_or(format_err!("Couldn't find ruby map"))?;
 
-        Addr::from(map.start as usize, &map.filename.unwrap())
+        Addr::from(map.start as usize, map.filename.as_ref().unwrap())
     }
 }
 
