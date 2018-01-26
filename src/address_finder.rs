@@ -93,7 +93,6 @@ mod os_impl {
                 0x100000000
             };
             match mach.symbols.as_ref() {
-            let base_address = 0;
                 Some(symbols) => {
                     for x in symbols.iter() {
                         let (name, sym) = x.unwrap();
