@@ -171,6 +171,7 @@ mod os_impl {
                     false
                 }
             }).ok_or(format_err!("Couldn't find ruby map"))?;
+        println!("{:?}", map);
         Addr::from(map.start as usize, map.filename.as_ref().unwrap())
     }
 }
