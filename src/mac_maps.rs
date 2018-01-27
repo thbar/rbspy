@@ -61,6 +61,7 @@ fn mach_vm_region(
     let mut object_name: mach_port_t = 0;
     let mut size = unsafe { mem::zeroed::<mach_vm_size_t>() };
     let mut info = unsafe { mem::zeroed::<vm_region_basic_info_data_t>() };
+    println!("Before mach_vm_region");
     let result = unsafe {
         mach::vm::mach_vm_region(
             target_task as vm_task_entry_t,
@@ -72,6 +73,7 @@ fn mach_vm_region(
             &mut object_name,
         )
     };
+    println!("After mac_vm_region");
     if result != KERN_SUCCESS {
         return None;
     }
@@ -91,8 +93,10 @@ fn mach_vm_region(
 pub fn task_for_pid(pid: pid_t) -> io::Result<mach_port_name_t> {
     let mut task: mach_port_name_t = MACH_PORT_NULL;
     unsafe {
+        println!("Before task_for_pid");
         let result =
             mach::traps::task_for_pid(mach::traps::mach_task_self(), pid as c_int, &mut task);
+        println!("After task_for_pid");
         if result != KERN_SUCCESS {
             return Err(io::Error::last_os_error());
         }

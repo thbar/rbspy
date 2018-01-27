@@ -43,6 +43,7 @@ where
         return Err(MemoryCopyError::RequestTooLarge(length));
     }
     let mut copy = vec![0; length];
+    println!("Before copy_adress");
     source.copy_address(addr as usize, &mut copy).map_err(|x| {
         if x.raw_os_error() == Some(3) {
             MemoryCopyError::ProcessEnded
@@ -52,6 +53,7 @@ where
             MemoryCopyError::Io(addr, x)
         }
     })?;
+    println!("After copy_adress");
     Ok(copy)
 }
 
