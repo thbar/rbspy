@@ -31,5 +31,5 @@ By default STDOUT is captured and not printed for successful tests.
 To get the output one can use:
 
 ```
-cargo run test_my_test -- --nocapture
+cargo test test_my_test -- --nocapture
 ```
